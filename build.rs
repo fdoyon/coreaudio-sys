@@ -11,6 +11,8 @@ fn sdk_path(target: &str) -> Result<String, std::io::Error> {
 
     let sdk = if target.contains("apple-darwin") {
         "macosx"
+    }else if target.starts_with("x86"){
+        "iphonesimulator"
     } else if target.contains("apple-ios") {
         "iphoneos"
     } else {
@@ -40,37 +42,42 @@ fn build(sdk_path: Option<&str>, target: &str) {
     let mut headers = vec![];
 
     #[cfg(feature = "audio_toolbox")]
-    {
-        println!("cargo:rustc-link-lib=framework=AudioToolbox");
-        headers.push("AudioToolbox/AudioToolbox.h");
-    }
+        {
+            println!("cargo:rustc-link-lib=framework=AudioToolbox");
+            headers.push("AudioToolbox/AudioToolbox.h");
+        }
 
     #[cfg(feature = "audio_unit")]
-    {
-        println!("cargo:rustc-link-lib=framework=AudioUnit");
-        headers.push("AudioUnit/AudioUnit.h");
-    }
+        {
+            println!("cargo:rustc-link-lib=framework=AudioUnit");
+            headers.push("AudioUnit/AudioUnit.h");
+        }
 
     #[cfg(feature = "core_audio")]
-    {
-        println!("cargo:rustc-link-lib=framework=CoreAudio");
-        headers.push("CoreAudio/CoreAudio.h");
-    }
+        {
+            println!("cargo:rustc-link-lib=framework=CoreAudio");
+
+            if target.contains("apple-ios") {
+                headers.push("CoreAudio/CoreAudioTypes.h");
+            } else {
+                headers.push("CoreAudio/CoreAudio.h");
+            }
+        }
 
     #[cfg(feature = "open_al")]
-    {
-        println!("cargo:rustc-link-lib=framework=OpenAL");
-        headers.push("OpenAL/al.h");
-        headers.push("OpenAL/alc.h");
-    }
+        {
+            println!("cargo:rustc-link-lib=framework=OpenAL");
+            headers.push("OpenAL/al.h");
+            headers.push("OpenAL/alc.h");
+        }
 
     #[cfg(all(feature = "core_midi"))]
-    {
-        if target.contains("apple-darwin") {
-            println!("cargo:rustc-link-lib=framework=CoreMIDI");
-            headers.push("CoreMIDI/CoreMIDI.h");
+        {
+            if target.contains("apple-darwin") {
+                println!("cargo:rustc-link-lib=framework=CoreMIDI");
+                headers.push("CoreMIDI/CoreMIDI.h");
+            }
         }
-    }
 
     println!("cargo:rerun-if-env-changed=BINDGEN_EXTRA_CLANG_ARGS");
     // Get the cargo out directory.
@@ -84,6 +91,8 @@ fn build(sdk_path: Option<&str>, target: &str) {
     if let Some(sdk_path) = sdk_path {
         builder = builder.clang_args(&["-isysroot", sdk_path]);
     }
+
+    // for iOS we need to specify the system includes
 
     let meta_header: Vec<_> = headers
         .iter()
@@ -105,10 +114,22 @@ fn build(sdk_path: Option<&str>, target: &str) {
         .expect("could not write bindings");
 }
 
+// LLVM (rust) and CLANG (bindgen) use different target names for ios
+fn to_clang_target(target: &str) -> Option<String> {
+    match target {
+        "aarch64-apple-ios" => Some("arm64-apple-ios".into()),
+        _ => None,
+    }
+}
+
 fn main() {
-    let target = std::env::var("TARGET").unwrap();
+    let mut target = std::env::var("TARGET").unwrap();
     if !(target.contains("apple-darwin") || target.contains("apple-ios")) {
         panic!("coreaudio-sys requires macos or ios target");
+    }
+
+    if let Some(patched) = to_clang_target(&target) {
+        target = patched
     }
 
     let directory = sdk_path(&target).ok();
